@@ -2,13 +2,14 @@
 
 import json
 import logging
+from google.adk.tools import FunctionTool
 from google.adk.tools.tool_context import ToolContext
 from . import db
 
 
 # ===== TOOL 1: PROCESS INPUT =====
 
-def process_input(
+def process_input_impl(
     tool_context: ToolContext,
     jd_text: str,
     candidate_name: str,
@@ -45,44 +46,16 @@ def process_input(
     }
 
 
-# ===== TOOL 2: RESEARCH ROLE =====
-# Note: research_agent uses google_search directly, no custom tool needed
-
-def save_research(
-    tool_context: ToolContext,
-    role_title: str,
-    required_skills: str,
-    market_insights: str
-) -> dict:
-    """Saves market research findings to state.
-
-    Args:
-        role_title: The target role title (e.g., "Senior ML Engineer").
-        required_skills: JSON string of required skills categorized by type.
-        market_insights: Market intelligence summary.
-
-    Returns:
-        Confirmation.
-    """
-    research = {
-        "role_title": role_title,
-        "required_skills": required_skills,
-        "market_insights": market_insights
-    }
-    tool_context.state["RESEARCH_RESULTS"] = json.dumps(research)
-    tool_context.state["ROLE_TITLE"] = role_title
-
-    logging.info(f"[Research] Saved research for {role_title}")
-
-    return {
-        "status": "success",
-        "role_title": role_title
-    }
+process_input = FunctionTool.from_function(
+    process_input_impl,
+    name="process_input",
+    description="Saves job description and candidate profile to state and database",
+)
 
 
-# ===== TOOL 3: ANALYZE SKILLS =====
+# ===== TOOL 2: ANALYZE SKILLS =====
 
-def analyze_skills(
+def analyze_skills_impl(
     tool_context: ToolContext,
     gap_analysis: str,
     readiness_score: float,
@@ -135,9 +108,16 @@ def analyze_skills(
     }
 
 
-# ===== TOOL 4: CREATE PLAN =====
+analyze_skills = FunctionTool.from_function(
+    analyze_skills_impl,
+    name="analyze_skills",
+    description="Analyzes skill gaps, calculates readiness score, saves to state and database",
+)
 
-def create_plan(
+
+# ===== TOOL 3: CREATE PLAN =====
+
+def create_plan_impl(
     tool_context: ToolContext,
     assessment_questions: str,
     learning_plan: str,
@@ -194,3 +174,10 @@ def create_plan(
         "timeline_weeks": timeline_weeks,
         "message": f"Assessment and {timeline_weeks}-week learning plan created successfully!"
     }
+
+
+create_plan = FunctionTool.from_function(
+    create_plan_impl,
+    name="create_plan",
+    description="Generates adaptive assessment and personalized learning roadmap, saves to state and database",
+)
