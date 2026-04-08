@@ -1,4 +1,4 @@
-"""SkillForge Agents — Multi-agent career intelligence pipeline using Google ADK."""
+"""SkillForge Agents — Simplified multi-agent career intelligence pipeline."""
 
 import logging
 import os
@@ -8,17 +8,11 @@ from google.adk import Agent
 from google.adk.agents import SequentialAgent
 from google.adk.tools import google_search
 
-from . import prompt as prompts
+from . import prompt
 from .tools import (
-    save_input_to_state,
-    save_candidate_to_db,
-    save_research_to_state,
-    save_analysis_to_state,
-    save_analysis_to_db,
-    save_assessment_to_state,
-    save_assessment_to_db,
-    save_plan_to_state,
-    save_plan_to_db,
+    process_input,
+    analyze_skills,
+    create_plan,
 )
 from .db import init_db
 
@@ -32,55 +26,87 @@ model_name = os.getenv("MODEL", "gemini-2.0-flash")
 init_db()
 
 
-# Research Agent: Analyzes job descriptions and researches market skill requirements using web search.
+# ===== CORE AGENTS (one tool each) =====
+
+# Input Agent: Collects and persists user input
+input_agent = Agent(
+    name="input_agent",
+    model=model_name,
+    description="Collects job description and candidate profile, saves to state and database.",
+    instruction=prompt.INPUT_AGENT_INSTRUCTION,
+    tools=[process_input],
+)
+
+# Search Sub-Agent: Performs web searches
+search_sub_agent = Agent(
+    name="search_sub_agent",
+    model=model_name,
+    description="Performs web searches for market intelligence.",
+    instruction="You are a search specialist. Use google_search to find current market data, required skills, salary ranges, and technology trends for the role described in state.",
+    tools=[google_search],
+)
+
+# Research Agent: Market intelligence coordinator (uses search sub-agent)
 research_agent = Agent(
     name="research_agent",
     model=model_name,
-    description="Analyzes job descriptions and researches market skill requirements using web search.",
-    instruction=prompts.RESEARCH_AGENT_INSTRUCTION,
-    tools=[save_research_to_state, google_search],
+    description="Researches market requirements and role expectations using web search.",
+    instruction=prompt.RESEARCH_AGENT_INSTRUCTION,
+    sub_agents=[search_sub_agent],
 )
 
-# Skill Analyzer: Compares required skills against candidate profile to identify gaps and calculate readiness.
-skill_analyzer = Agent(
-    name="skill_analyzer",
+# Analyzer Agent: Performs skill gap analysis
+analyzer_agent = Agent(
+    name="analyzer_agent",
     model=model_name,
-    description="Compares required skills against candidate profile to identify gaps and calculate readiness.",
-    instruction=prompts.SKILL_ANALYZER_INSTRUCTION,
-    tools=[save_analysis_to_state, save_analysis_to_db],
+    description="Analyzes skill gaps, calculates readiness score, persists analysis.",
+    instruction=prompt.ANALYZER_AGENT_INSTRUCTION,
+    tools=[analyze_skills],
 )
 
-# Assessment Agent: Generates adaptive skill assessment questions targeting identified gaps.
-assessment_agent = Agent(
-    name="assessment_agent",
+# Search Sub-Agent for Planner: Finds learning resources
+resource_search_agent = Agent(
+    name="resource_search_agent",
     model=model_name,
-    description="Generates adaptive skill assessment questions targeting identified gaps.",
-    instruction=prompts.ASSESSMENT_AGENT_INSTRUCTION,
-    tools=[save_assessment_to_state, save_assessment_to_db],
+    description="Finds learning resources, courses, and tutorials via web search.",
+    instruction="You are a learning resource specialist. Use google_search to find free courses, tutorials, documentation, and practice projects for the skills identified in the gap analysis. Search for 3-5 high-quality resources per skill gap.",
+    tools=[google_search],
 )
 
-# Learning Planner: Creates personalized, time-bound learning plans with real resources and milestones.
-learning_planner = Agent(
-    name="learning_planner",
+# Plan Saver Agent: Generates assessment and saves plan
+plan_saver_agent = Agent(
+    name="plan_saver_agent",
     model=model_name,
-    description="Creates personalized, time-bound learning plans with real resources and milestones.",
-    instruction=prompts.LEARNING_PLANNER_INSTRUCTION,
-    tools=[save_plan_to_state, save_plan_to_db, google_search],
+    description="Generates adaptive assessment and personalized learning roadmap, saves to database.",
+    instruction=prompt.PLANNER_AGENT_INSTRUCTION,
+    tools=[create_plan],
 )
 
-analysis_pipeline = SequentialAgent(
-    name="analysis_pipeline",
-    description="Runs the full SkillForge analysis: Research -> Gap Analysis -> Assessment -> Learning Plan.",
-    agents=[research_agent, skill_analyzer, assessment_agent, learning_planner],
+# Planner Pipeline: Sequential execution of resource search then plan creation
+planner_pipeline = SequentialAgent(
+    name="planner_pipeline",
+    description="Find learning resources, then generate assessment and learning plan.",
+    sub_agents=[resource_search_agent, plan_saver_agent],
 )
 
 
-# Root Agent: Orchestrates the entire multi-agent pipeline, starting with collecting job description and candidate skills, then coordinating the analysis process.
+# ===== PIPELINE =====
+
+# Main Pipeline: Runs all 4 stages sequentially
+main_pipeline = SequentialAgent(
+    name="main_pipeline",
+    description="Runs the full SkillForge workflow: Input → Research → Analysis → Planning",
+    sub_agents=[input_agent, research_agent, analyzer_agent, planner_pipeline],
+)
+
+
+# ===== ROOT AGENT =====
+
+# Root Agent: Entry point that delegates to main pipeline
 root_agent = Agent(
     name="skillforge_orchestrator",
     model=model_name,
-    description="SkillForge entry point — collects job description and candidate skills, then orchestrates the multi-agent analysis pipeline.",
-    instruction=prompts.ORCHESTRATOR_INSTRUCTION,
-    tools=[save_input_to_state, save_candidate_to_db],
-    sub_agents=[analysis_pipeline],
+    description="SkillForge entry point — collects job description and candidate skills, then orchestrates analysis.",
+    instruction=prompt.ORCHESTRATOR_INSTRUCTION,
+    sub_agents=[main_pipeline],
 )
